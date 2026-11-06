@@ -329,9 +329,8 @@ async def to_code(configs):
             # esphome-lvgl-p4: PPA for unrounded fills + opaque images (upstream: off "until bugs fixed")
             df.add_define("LV_USE_PPA", "1")
             df.add_define("LV_USE_PPA_IMG", "1")
-            # esphome-lvgl-p4: render on both cores (LVGL draw threads need its FreeRTOS OS layer)
-            df.add_define("LV_USE_OS", "LV_OS_FREERTOS")
-            df.add_define("LV_DRAW_SW_DRAW_UNIT_CNT", "2")
+            # esphome-lvgl-p4: rendering on both cores (LV_OS_FREERTOS + 2 draw units) was removed again:
+            # under render layers it deadlocked (loop task waiting forever, both cores idle -> watchdog)
             # esphome-lvgl-p4: keep rendered shadows / circle masks instead of recomputing them every frame
             df.add_define("LV_DRAW_SW_SHADOW_CACHE_SIZE", "96")
             df.add_define("LV_DRAW_SW_CIRCLE_CACHE_SIZE", "16")
