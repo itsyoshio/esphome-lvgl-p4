@@ -6,6 +6,8 @@
 
 #include "core/lv_global.h"
 #include "core/lv_obj_class_private.h"
+#include "draw/lv_draw_private.h"
+#include "draw/lv_draw_buf_private.h"
 
 #include <numeric>
 
@@ -195,8 +197,41 @@ void LvglComponent::set_paused(bool paused, bool show_snow) {
     this->resume_callback_->trigger();
 }
 
+#if LV_USE_PPA
+// esphome-lvgl-p4: the PPA needs destination buffers whose address and size are multiples of the cache line
+// (64 bytes). Layers of odd width are not, the PPA call then fails ("not aligned to cache line size") and the
+// render task never completes -> loop watchdog. Only hand aligned buffers to the PPA, software draws the rest.
+static int32_t (*ppa_evaluate_orig)(lv_draw_unit_t *, lv_draw_task_t *) = nullptr;
+static int32_t ppa_evaluate_aligned(lv_draw_unit_t *u, lv_draw_task_t *t) {
+  const auto *base = static_cast<const lv_draw_dsc_base_t *>(t->draw_dsc);
+  lv_layer_t *layer = base != nullptr ? base->layer : nullptr;
+  if (layer == nullptr)
+    return 0;
+  size_t size;
+  uintptr_t addr = 0;
+  if (layer->draw_buf != nullptr) {
+    size = layer->draw_buf->data_size;
+    addr = reinterpret_cast<uintptr_t>(layer->draw_buf->data);
+  } else {
+    size = lv_draw_buf_width_to_stride(lv_area_get_width(&layer->buf_area), layer->color_format) *
+           lv_area_get_height(&layer->buf_area);
+  }
+  if ((size % 64) != 0 || (addr % 64) != 0)
+    return 0;
+  return ppa_evaluate_orig(u, t);
+}
+#endif
+
 void LvglComponent::esphome_lvgl_init() {
   lv_init();
+#if LV_USE_PPA
+  for (lv_draw_unit_t *u = LV_GLOBAL_DEFAULT()->draw_info.unit_head; u != nullptr; u = u->next) {
+    if (u->name != nullptr && strcmp(u->name, "ESP_PPA") == 0 && ppa_evaluate_orig == nullptr) {
+      ppa_evaluate_orig = u->evaluate_cb;
+      u->evaluate_cb = ppa_evaluate_aligned;
+    }
+  }
+#endif
   // override draw buf alloc to ensure proper alignment for PPA
   LV_GLOBAL_DEFAULT()->draw_buf_handlers.buf_malloc_cb = draw_buf_alloc_cb;
   LV_GLOBAL_DEFAULT()->draw_buf_handlers.buf_free_cb = lv_free_core;
