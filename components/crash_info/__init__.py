@@ -2,7 +2,7 @@
 
 import esphome.codegen as cg
 import esphome.config_validation as cv
-from esphome.components.esp32 import add_idf_sdkconfig_option
+from esphome.components.esp32 import add_idf_sdkconfig_option, include_builtin_idf_component
 from esphome.const import CONF_ID
 
 CODEOWNERS = ["@itsyoshio"]
@@ -27,6 +27,7 @@ async def to_code(config):
     await cg.register_component(var, config)
     if config[CONF_COREDUMP]:
         cg.add_define("USE_CRASH_INFO_COREDUMP")
+        include_builtin_idf_component("espcoredump")
         add_idf_sdkconfig_option("CONFIG_ESP_COREDUMP_ENABLE_TO_FLASH", True)
         add_idf_sdkconfig_option("CONFIG_ESP_COREDUMP_DATA_FORMAT_ELF", True)
         add_idf_sdkconfig_option("CONFIG_ESP_COREDUMP_CHECKSUM_CRC32", True)
