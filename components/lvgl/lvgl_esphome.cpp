@@ -360,7 +360,11 @@ bool LvglComponent::ppa_rotate_(const lv_color_data *src, lv_color_data *dst, ui
   srm_config.rotation_angle = angle;
   srm_config.scale_x = 1.0f;
   srm_config.scale_y = 1.0f;
-  srm_config.mode = PPA_TRANS_MODE_BLOCKING;
+  // Non-blocking with our own timeout: the PPA driver sometimes never signals the end of a transaction
+  // (seen on the ESP32-P4 every few minutes), and a blocking call then hangs the main loop forever.
+  srm_config.mode = PPA_TRANS_MODE_NON_BLOCKING;
+  srm_config.user_data = this->ppa_done_;
+  xSemaphoreTake(this->ppa_done_, 0);  // drop a late signal of an earlier transaction
 
   esp_err_t ret = ppa_do_scale_rotate_mirror(this->ppa_client_, &srm_config);
   if (ret != ESP_OK) {
@@ -369,7 +373,19 @@ bool LvglComponent::ppa_rotate_(const lv_color_data *src, lv_color_data *dst, ui
              dst, out_buf_size, (int) angle);
     return false;
   }
+  if (xSemaphoreTake(this->ppa_done_, pdMS_TO_TICKS(100)) != pdTRUE) {
+    // the PPA is stuck: never use it again (a stuck transaction blocks every later one)
+    ESP_LOGE(TAG, "PPA rotation of %ux%u timed out, using software rotation from now on", width, height);
+    this->ppa_client_ = nullptr;
+    return false;
+  }
   return true;
+}
+
+static bool IRAM_ATTR ppa_trans_done_cb(ppa_client_handle_t, ppa_event_data_t *, void *user_data) {
+  BaseType_t woken = pdFALSE;
+  xSemaphoreGiveFromISR(static_cast<SemaphoreHandle_t>(user_data), &woken);
+  return woken == pdTRUE;
 }
 #endif  // USE_ESP32_VARIANT_ESP32P4
 
@@ -874,7 +890,11 @@ void LvglComponent::setup() {
     ppa_client_config_t ppa_config{};
     ppa_config.oper_type = PPA_OPERATION_SRM;
     ppa_config.max_pending_trans_num = 1;
-    if (ppa_register_client(&ppa_config, &this->ppa_client_) != ESP_OK) {
+    this->ppa_done_ = xSemaphoreCreateBinary();
+    ppa_event_callbacks_t ppa_cbs{};
+    ppa_cbs.on_trans_done = ppa_trans_done_cb;
+    if (this->ppa_done_ == nullptr || ppa_register_client(&ppa_config, &this->ppa_client_) != ESP_OK ||
+        ppa_client_register_event_callbacks(this->ppa_client_, &ppa_cbs) != ESP_OK) {
       ESP_LOGW(TAG, "PPA client registration failed, using software rotation");
       this->ppa_client_ = nullptr;
     }

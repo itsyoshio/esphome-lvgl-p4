@@ -28,6 +28,8 @@
 
 #ifdef USE_ESP32_VARIANT_ESP32P4
 #include "driver/ppa.h"
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #endif
 
 #ifdef USE_FONT
@@ -391,6 +393,7 @@ class LvglComponent final : public PollingComponent {
   RotationType rotation_type_;
 #ifdef USE_ESP32_VARIANT_ESP32P4
   ppa_client_handle_t ppa_client_{};
+  SemaphoreHandle_t ppa_done_{};  // given by the PPA ISR when a rotation is finished
 #endif
 };
 
