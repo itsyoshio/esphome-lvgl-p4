@@ -201,8 +201,13 @@ void LvglComponent::set_paused(bool paused, bool show_snow) {
 // esphome-lvgl-p4: the PPA needs destination buffers whose address and size are multiples of the cache line
 // (64 bytes). Layers of odd width are not, the PPA call then fails ("not aligned to cache line size") and the
 // render task never completes -> loop watchdog. Only hand aligned buffers to the PPA, software draws the rest.
+// Images never go to the PPA: in LVGL 9.5 it only accepts see-through images (opa < 255) and then copies them
+// fully opaque (lv_draw_ppa_img ignores opa), so dimmed or cross-fading images showed bright rectangles wherever
+// a part was redrawn. Fully opaque images were never PPA-drawn anyway; fills stay on the PPA.
 static int32_t (*ppa_evaluate_orig)(lv_draw_unit_t *, lv_draw_task_t *) = nullptr;
 static int32_t ppa_evaluate_aligned(lv_draw_unit_t *u, lv_draw_task_t *t) {
+  if (t->type == LV_DRAW_TASK_TYPE_IMAGE)
+    return 0;
   const auto *base = static_cast<const lv_draw_dsc_base_t *>(t->draw_dsc);
   lv_layer_t *layer = base != nullptr ? base->layer : nullptr;
   if (layer == nullptr)
